@@ -2,14 +2,27 @@
 namespace FOBMS;
 
 class Database {
-    private $conn;
     private static $instance = null;
+    private $pdo;
+    private $stmt;
+    private $inTransaction = false;
+    private $paramCount = 0;
 
     private function __construct() {
-        require_once __DIR__ . '/../config/config.php';
-        $this->conn = get_db_connection();
-        if (!$this->conn) {
-            handle_error("Database connection failed", "FATAL");
+        $this->connect();
+    }
+
+    private function connect() {
+        try {
+            $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4";
+            $this->pdo = new \PDO($dsn, DB_USER, DB_PASS, [
+                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+                \PDO::ATTR_EMULATE_PREPARES => false
+            ]);
+        } catch (\PDOException $e) {
+            error_log("Database connection error: " . $e->getMessage());
+            throw new \Exception("Database connection failed: " . $e->getMessage());
         }
     }
 
@@ -20,53 +33,91 @@ class Database {
         return self::$instance;
     }
 
-    public function query($sql, $params = []) {
+    public function beginTransaction() {
+        if ($this->inTransaction) {
+            throw new \Exception("Transaction already in progress");
+        }
+        $this->pdo->beginTransaction();
+        $this->inTransaction = true;
+    }
+
+    public function commit() {
+        if (!$this->inTransaction) {
+            throw new \Exception("No transaction in progress");
+        }
+        $this->pdo->commit();
+        $this->inTransaction = false;
+    }
+
+    public function rollback() {
+        if (!$this->inTransaction) {
+            throw new \Exception("No transaction in progress");
+        }
+        $this->pdo->rollBack();
+        $this->inTransaction = false;
+    }
+
+    public function query($sql) {
         try {
-            $stmt = $this->conn->prepare($sql);
-            if (!$stmt) {
-                throw new \Exception("Query preparation failed: " . $this->conn->error);
-            }
-
-            if (!empty($params)) {
-                $types = '';
-                foreach ($params as $param) {
-                    if (is_int($param)) {
-                        $types .= 'i';
-                    } elseif (is_float($param)) {
-                        $types .= 'd';
-                    } elseif (is_string($param)) {
-                        $types .= 's';
-                    } else {
-                        $types .= 'b';
-                    }
-                }
-                $stmt->bind_param($types, ...$params);
-            }
-
-            $stmt->execute();
-            return $stmt;
-        } catch (\Exception $e) {
-            handle_error($e->getMessage());
-            return false;
+            $this->stmt = $this->pdo->prepare($sql);
+            $this->paramCount = 0;
+            return $this;
+        } catch (\PDOException $e) {
+            error_log("Query preparation failed: " . $e->getMessage() . "\nQuery: " . $sql);
+            throw new \Exception("Query preparation failed: " . $e->getMessage());
         }
     }
 
-    public function fetch($sql, $params = []) {
-        $stmt = $this->query($sql, $params);
-        if ($stmt) {
-            $result = $stmt->get_result();
-            return $result->fetch_assoc();
+    public function bind($param, $value) {
+        try {
+            $type = \PDO::PARAM_STR;
+            if (is_int($value)) {
+                $type = \PDO::PARAM_INT;
+            } elseif (is_bool($value)) {
+                $type = \PDO::PARAM_BOOL;
+            } elseif (is_null($value)) {
+                $type = \PDO::PARAM_NULL;
+            }
+            $this->paramCount++;
+            $this->stmt->bindValue($param === null ? $this->paramCount : $param, $value, $type);
+            return $this;
+        } catch (\PDOException $e) {
+            error_log("Parameter binding failed: " . $e->getMessage());
+            throw new \Exception("Parameter binding failed: " . $e->getMessage());
         }
-        return false;
     }
 
-    public function fetchAll($sql, $params = []) {
-        $stmt = $this->query($sql, $params);
-        if ($stmt) {
-            $result = $stmt->get_result();
-            return $result->fetch_all(MYSQLI_ASSOC);
+    public function execute() {
+        try {
+            return $this->stmt->execute();
+        } catch (\PDOException $e) {
+            error_log("Query execution failed: " . $e->getMessage());
+            throw new \Exception("Query execution failed: " . $e->getMessage());
         }
-        return false;
+    }
+
+    public function fetch() {
+        try {
+            $this->execute();
+            return $this->stmt->fetch();
+        } catch (\PDOException $e) {
+            error_log("Fetch failed: " . $e->getMessage());
+            throw new \Exception("Fetch failed: " . $e->getMessage());
+        }
+    }
+
+    public function fetchAll() {
+        try {
+            $this->execute();
+            return $this->stmt->fetchAll();
+        } catch (\PDOException $e) {
+            error_log("FetchAll failed: " . $e->getMessage());
+            throw new \Exception("FetchAll failed: " . $e->getMessage());
+        }
+    }
+
+    public function lastInsertId() {
+        return $this->pdo->lastInsertId();
     }
 
     public function insert($table, $data) {
@@ -74,39 +125,34 @@ class Database {
         $values = implode(', ', array_fill(0, count($data), '?'));
         $sql = "INSERT INTO $table ($columns) VALUES ($values)";
         
-        return $this->query($sql, array_values($data));
+        $this->query($sql);
+        foreach ($data as $value) {
+            $this->bind(null, $value);
+        }
+        return $this->execute();
     }
 
     public function update($table, $data, $where, $whereParams = []) {
         $set = implode(' = ?, ', array_keys($data)) . ' = ?';
         $sql = "UPDATE $table SET $set WHERE $where";
         
-        $params = array_merge(array_values($data), $whereParams);
-        return $this->query($sql, $params);
+        $this->query($sql);
+        foreach (array_merge(array_values($data), $whereParams) as $value) {
+            $this->bind(null, $value);
+        }
+        return $this->execute();
     }
 
     public function delete($table, $where, $params = []) {
         $sql = "DELETE FROM $table WHERE $where";
-        return $this->query($sql, $params);
-    }
-
-    public function beginTransaction() {
-        $this->conn->begin_transaction();
-    }
-
-    public function commit() {
-        $this->conn->commit();
-    }
-
-    public function rollback() {
-        $this->conn->rollback();
-    }
-
-    public function lastInsertId() {
-        return $this->conn->insert_id;
+        $this->query($sql);
+        foreach ($params as $value) {
+            $this->bind(null, $value);
+        }
+        return $this->execute();
     }
 
     public function escape($value) {
-        return $this->conn->real_escape_string($value);
+        return substr($this->pdo->quote($value), 1, -1);
     }
 } 
