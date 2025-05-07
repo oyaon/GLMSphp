@@ -1,13 +1,15 @@
-# FOBMS (Fleet Operations and Business Management System)
+# GLMSphp (Gobindaganj Library Management System)
 
-A comprehensive fleet operations and business management system built with PHP.
+A comprehensive library management system built with PHP.
 
 ## Features
 
-- Fleet Management
-- Business Operations
+- Book Management
 - User Management
-- Reporting System
+- Borrowing System
+- Fine Management
+- Admin Dashboard
+- Search Functionality
 
 ## Requirements
 
@@ -20,8 +22,8 @@ A comprehensive fleet operations and business management system built with PHP.
 
 1. Clone the repository:
 ```bash
-git clone [repository-url]
-cd FOBMS
+git clone https://github.com/oyaon/GLMSphp.git
+cd GLMSphp
 ```
 
 2. Install dependencies:
@@ -36,25 +38,27 @@ cp .env.example .env
 ```
 
 4. Set up the database:
-```bash
-php artisan migrate
-```
+- Create a new MySQL database
+- Import the database schema from `database/schema.sql`
+- Update the database credentials in `.env`
 
-5. Start the development server:
-```bash
-php artisan serve
-```
+5. Configure your web server:
+- Point your web server's document root to the `public` directory
+- Ensure the web server has write permissions to the `storage` directory
 
 ## Project Structure
 
 ```
-FOBMS/
-├── app/            # Application code
+GLMSphp/
+├── public/         # Publicly accessible files
+│   └── index.php   # Entry point
+├── src/            # Application source code
+│   ├── views/      # View templates
+│   ├── models/     # Database models
+│   └── controllers/# Application controllers
 ├── config/         # Configuration files
 ├── database/       # Database migrations and seeds
-├── public/         # Publicly accessible files
-├── resources/      # Views, assets, and language files
-├── routes/         # Route definitions
+├── resources/      # Assets (CSS, JS, images)
 ├── storage/        # Application storage
 └── tests/          # Test files
 ```
